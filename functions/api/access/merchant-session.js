@@ -1,4 +1,4 @@
-// Verifica a sessão do lojista usando o cookie assinado com SESSION_SECRET.
+// Diagnóstico da sessão do lojista.
 
 const COOKIE = 'mf_merchant_session'
 
@@ -30,7 +30,7 @@ function unb64(value) {
 
 async function verifySession(request, env) {
   const secret = env.SESSION_SECRET
-  if (!secret) return null
+  if (!secret) return { error: 'SESSION_SECRET ausente.' }
 
   const cookieHeader = request.headers.get('cookie') || ''
   const cookie = cookieHeader
@@ -38,14 +38,14 @@ async function verifySession(request, env) {
     .map(part => part.trim())
     .find(part => part.startsWith(`${COOKIE}=`))
 
-  if (!cookie) return null
+  if (!cookie) return { error: 'Cookie da sessão não encontrado.' }
 
   const value = cookie.slice(COOKIE.length + 1)
-  const [payload, signature] = value.split('.')
+  const parts = value.split('.')
 
-  if (!payload || !signature || value.split('.').length !== 2) {
-    return null
-  }
+  if (parts.length !== 2) return { error: 'Cookie inválido.' }
+
+  const [payload, signature] = parts
 
   const key = await crypto.subtle.importKey(
     'raw',
@@ -66,62 +66,77 @@ async function verifySession(request, env) {
     .replace(/\//g, '_')
     .replace(/=/g, '')
 
-  if (expected !== signature) return null
+  if (expected !== signature) return { error: 'Assinatura da sessão inválida.' }
 
   try {
     const session = JSON.parse(new TextDecoder().decode(unb64(payload)))
 
-    if (!session.merchantId) return null
-    if (!Number.isInteger(session.exp)) return null
-    if (session.exp < Math.floor(Date.now() / 1000)) return null
+    if (!session.merchantId) return { error: 'Sessão sem merchantId.' }
+    if (!Number.isInteger(session.exp)) return { error: 'Sessão sem expiração.' }
+    if (session.exp < Math.floor(Date.now() / 1000)) return { error: 'Sessão expirada.' }
 
-    return session
-  } catch {
-    return null
+    return { session }
+  } catch (error) {
+    return { error: 'Erro ao decodificar sessão: ' + String(error) }
   }
 }
 
 export async function onRequestGet(context) {
-  const { env, request } = context
-
-  const session = await verifySession(request, env)
-
-  if (!session) {
-    return json({ authenticated: false }, 401)
-  }
-
-  let merchant
-
   try {
-    merchant = await env.DB.prepare(`
-      SELECT
-        m.id,
-        m.business_name,
-        m.status,
-        m.trial_ends_at,
-        s.status AS subscription_status,
-        s.trial_ends_at AS subscription_trial_ends_at,
-        s.paid_until
-      FROM merchants m
-      LEFT JOIN subscriptions s ON s.merchant_id = m.id
-      WHERE m.id = ?1
-    `).bind(Number(session.merchantId)).first()
+    const { env, request } = context
+
+    const result = await verifySession(request, env)
+
+    if (result.error) {
+      return json({
+        authenticated: false,
+        debug: result.error
+      }, 401)
+    }
+
+    const session = result.session
+
+    let merchant
+
+    try {
+      merchant = await env.DB.prepare(`
+        SELECT
+          m.id,
+          m.business_name,
+          m.status,
+          m.trial_ends_at,
+          s.status AS subscription_status,
+          s.trial_ends_at AS subscription_trial_ends_at,
+          s.paid_until
+        FROM merchants m
+        LEFT JOIN subscriptions s ON s.merchant_id = m.id
+        WHERE m.id = ?1
+      `).bind(Number(session.merchantId)).first()
+    } catch (error) {
+      return json({
+        authenticated: false,
+        debug: 'Erro no banco: ' + String(error && error.message ? error.message : error)
+      }, 500)
+    }
+
+    if (!merchant) {
+      return json({
+        authenticated: false,
+        debug: 'Lojista não encontrado no banco.'
+      }, 401)
+    }
+
+    return json({
+      authenticated: true,
+      merchantId: String(merchant.id),
+      merchant
+    })
   } catch (error) {
     return json({
       authenticated: false,
-      debug_error: String(error && error.message ? error.message : error)
+      debug: 'Erro geral: ' + String(error && error.message ? error.message : error)
     }, 500)
   }
-
-  if (!merchant) {
-    return json({ authenticated: false }, 401)
-  }
-
-  return json({
-    authenticated: true,
-    merchantId: String(merchant.id),
-    merchant,
-  })
 }
 
 export { verifySession as verifyMerchantSession }
