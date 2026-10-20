@@ -54,12 +54,13 @@ async function verifySession(request, env) {
     false,
     ['sign']
   )
-
-  const expected = b64(
-    await crypto.subtle.sign(
-      'HMAC',
-      key,
-      new TextEncoder().encode(payload)
+const expected = b64(
+    new Uint8Array(
+      await crypto.subtle.sign(
+        'HMAC',
+        key,
+        new TextEncoder().encode(payload)
+      )
     )
   )
     .replace(/\+/g, '-')
