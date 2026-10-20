@@ -90,19 +90,28 @@ export async function onRequestGet(context) {
     return json({ authenticated: false }, 401)
   }
 
-  const merchant = await env.DB.prepare(`
-    SELECT
-      m.id,
-      m.business_name,
-      m.status,
-      m.trial_ends_at,
-      s.status AS subscription_status,
-      s.trial_ends_at AS subscription_trial_ends_at,
-      s.paid_until
-    FROM merchants m
-    LEFT JOIN subscriptions s ON s.merchant_id = m.id
-    WHERE m.id = ?1
-  `).bind(Number(session.merchantId)).first()
+  let merchant
+
+  try {
+    merchant = await env.DB.prepare(`
+      SELECT
+        m.id,
+        m.business_name,
+        m.status,
+        m.trial_ends_at,
+        s.status AS subscription_status,
+        s.trial_ends_at AS subscription_trial_ends_at,
+        s.paid_until
+      FROM merchants m
+      LEFT JOIN subscriptions s ON s.merchant_id = m.id
+      WHERE m.id = ?1
+    `).bind(Number(session.merchantId)).first()
+  } catch (error) {
+    return json({
+      authenticated: false,
+      debug_error: String(error && error.message ? error.message : error)
+    }, 500)
+  }
 
   if (!merchant) {
     return json({ authenticated: false }, 401)
