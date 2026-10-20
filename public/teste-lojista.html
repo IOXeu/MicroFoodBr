@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Teste do Lojista</title>
+  <style>
+    :root { --ink:#20382c; --green:#245c42; --line:#d9d5c9; --muted:#66736a; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#f7f5ee; color:var(--ink); font:15px/1.55 system-ui,sans-serif; }
+    .wrap { width:min(720px,calc(100% - 24px)); margin:auto; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:22px; margin:18px 0; }
+    h1 { font-size:23px; margin:0 0 6px; }
+    .muted { color:var(--muted); font-size:14px; }
+    .field { display:flex; flex-direction:column; gap:6px; margin-bottom:12px; }
+    label { font-size:13px; font-weight:750; }
+    input, textarea, select { padding:10px; border:1px solid var(--line); border-radius:10px; font:inherit; background:#fff; }
+    button { border:0; background:var(--green); color:#fff; padding:10px 15px; border-radius:10px; font-weight:750; cursor:pointer; }
+    button.secondary { background:#fff; color:inherit; border:1px solid var(--line); }
+    .msg { margin-top:12px; font-size:14px; white-space:pre-line; }
+    .ok { color:#1d6b40; }
+    .bad { color:#a23024; }
+    .hidden { display:none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Login do lojista</h1>
+      <p class="muted">Use o e-mail e a senha temporária criados pelo administrador.</p>
+
+      <div class="field">
+        <label for="email">E-mail</label>
+        <input id="email" type="email" autocomplete="username">
+      </div>
+
+      <div class="field">
+        <label for="password">Senha</label>
+        <input id="password" type="password" autocomplete="current-password">
+      </div>
+
+      <button id="login" type="button">Entrar</button>
+      <button id="check" class="secondary" type="button">Ver sessão</button>
+      <div id="loginMsg" class="msg"></div>
+    </div>
+
+    <div class="card hidden" id="storeCard">
+      <h1>Configuração da loja</h1>
+      <p class="muted" id="accessInfo"></p>
+
+      <div class="field">
+        <label for="storeName">Nome da loja</label>
+        <input id="storeName">
+      </div>
+
+      <div class="field">
+        <label for="description">Descrição</label>
+        <textarea id="description" rows="3"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="whatsapp">WhatsApp</label>
+        <input id="whatsapp" inputmode="numeric">
+      </div>
+
+      <div class="field">
+        <label for="announcement">Aviso da loja</label>
+        <input id="announcement">
+      </div>
+
+      <div class="field">
+        <label for="primaryColor">Cor principal</label>
+        <input id="primaryColor" type="color">
+      </div>
+
+      <div class="field">
+        <label>
+          <input id="pickup" type="checkbox">
+          Permitir retirada na loja
+        </label>
+      </div>
+
+      <div class="field">
+        <label>
+          <input id="delivery" type="checkbox">
+          Permitir entrega
+        </label>
+      </div>
+
+      <div class="field">
+        <label>
+          <input id="published" type="checkbox">
+          Publicar loja
+        </label>
+      </div>
+
+      <button id="save" type="button">Salvar configuração</button>
+      <button id="logout" class="secondary" type="button">Sair</button>
+      <div id="storeMsg" class="msg"></div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      'use strict'
+
+      const $ = selector => document.querySelector(selector)
+
+      async function request(url, options = {}) {
+        const response = await fetch(url, {
+          credentials: 'same-origin',
+          ...options,
+        })
+
+        const data = await response.json().catch(() => ({}))
+
+        if (!response.ok) {
+          throw new Error(data.error || `Erro ${response.status}`)
+        }
+
+        return data
+      }
+
+      function showMessage(element, text, type) {
+        element.textContent = text
+        element.className = `msg ${type}`
+      }
+
+      async function checkSession() {
+        try {
+          const data = await request('/api/access/merchant-session')
+          return data
+        } catch {
+          return { authenticated: false }
+        }
+      }
+
+      async function loadStore() {
+        const session = await checkSession()
+
+        if (!session.authenticated) {
+          $('#storeCard').classList.add('hidden')
+          return
+        }
+
+        $('#storeCard').classList.remove('hidden')
+        $('#accessInfo').textContent = `Loja #${session.merchantId} — ${session.merchant.business_name}`
+
+        try {
+          const data = await request('/api/store/config')
+          const settings = data.settings || {}
+
+          $('#storeName').value = settings.store_name || ''
+          $('#description').value = settings.description || ''
+          $('#whatsapp').value = settings.whatsapp_number || ''
+          $('#announcement').value = settings.announcement || ''
+          $('#primaryColor').value = settings.primary_color || '#e63946'
+          $('#pickup').checked = settings.pickup_enabled === 1
+          $('#delivery').checked = settings.delivery_enabled === 1
+          $('#published').checked = settings.is_published === 1
+
+          showMessage($('#storeMsg'), data.access === 'teste'
+            ? 'Teste de 7 dias ativo.'
+            : 'Assinatura ativa.', 'ok')
+        } catch (error) {
+          showMessage($('#storeMsg'), error.message, 'bad')
+        }
+      }
+
+      $('#login').addEventListener('click', async () => {
+        try {
+          await request('/api/access/merchant-login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              email: $('#email').value,
+              password: $('#password').value,
+            }),
+          })
+
+          showMessage($('#loginMsg'), 'Login realizado.', 'ok')
+          await loadStore()
+        } catch (error) {
+          showMessage($('#loginMsg'), error.message, 'bad')
+        }
+      })
+
+      $('#check').addEventListener('click', async () => {
+        const session = await checkSession()
+        showMessage(
+          $('#loginMsg'),
+          session.authenticated
+            ? `Logado como loja #${session.merchantId}.`
+            : 'Não autenticado.',
+          session.authenticated ? 'ok' : 'bad'
+        )
+
+        if (session.authenticated) await loadStore()
+      })
+
+      $('#save').addEventListener('click', async () => {
+        try {
+          await request('/api/store/config', {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              storeName: $('#storeName').value,
+              description: $('#description').value,
+              whatsappNumber: $('#whatsapp').value,
+              announcement: $('#announcement').value,
+              primaryColor: $('#primaryColor').value,
+              pickupEnabled: $('#pickup').checked,
+              deliveryEnabled: $('#delivery').checked,
+              isPublished: $('#published').checked,
+            }),
+          })
+
+          showMessage($('#storeMsg'), 'Configuração salva.', 'ok')
+        } catch (error) {
+          showMessage($('#storeMsg'), error.message, 'bad')
+        }
+      })
+
+      $('#logout').addEventListener('click', async () => {
+        document.cookie = 'mf_merchant_session=; Path=/; Max-Age=0; Secure; SameSite=Strict'
+        $('#storeCard').classList.add('hidden')
+        showMessage($('#loginMsg'), 'Sessão encerrada neste navegador.', 'ok')
+      })
+
+      loadStore()
+    })()
+  </script>
+</body>
+</html>
