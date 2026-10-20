@@ -93,11 +93,13 @@ async function merchantAccess(env, merchantId) {
 export async function onRequestGet(context) {
   const { env, request } = context
 
-  const session = await verifyMerchantSession(request, env)
+  const auth = await verifyMerchantSession(request, env)
 
-  if (!session) {
+  if (!auth.session) {
     return json({ error: 'Faça login como lojista.' }, 401)
   }
+
+  const session = auth.session
 
   const access = await merchantAccess(env, session.merchantId)
 
@@ -120,11 +122,13 @@ export async function onRequestGet(context) {
 export async function onRequestPut(context) {
   const { env, request } = context
 
-  const session = await verifyMerchantSession(request, env)
+  const auth = await verifyMerchantSession(request, env)
 
-  if (!session) {
+  if (!auth.session) {
     return json({ error: 'Faça login como lojista.' }, 401)
   }
+
+  const session = auth.session
 
   const access = await merchantAccess(env, session.merchantId)
 
